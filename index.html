@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Nostr Wiki Viewer</title>
+  <script src="https://cdn.jsdelivr.net/npm/asciidoctor@2.2.6/dist/browser/asciidoctor.min.js"></script>
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: auto; }
+    #articles { display: flex; flex-wrap: wrap; }
+    .article { border: 1px solid #ccc; padding: 10px; margin: 10px; width: 45%; }
+    #comparison { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Nostr NIP-54 Wiki Viewer</h1>
+  <input id="d-tag" placeholder="Enter wiki title (e.g., 'nostr')" />
+  <button onclick="fetchWiki()">Load</button>
+  <div id="status"></div>
+  <div id="articles"></div>
+  <div id="comparison">
+    <h2>Comparison</h2>
+    <select id="left"></select> vs <select id="right"></select>
+    <button onclick="compareArticles()">Compare</button>
+    <pre id="diff"></pre>
+  </div>
+
+  <script>
+    const asciidoctor = Asciidoctor();
+    let events = [];
+
+    async function fetchWiki() {
+      const d = document.getElementById('d-tag').value.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+      document.getElementById('status').textContent = 'Loading...';
+      const res = await fetch(`/api/wiki/${d}`);
+      const data = await res.json();
+      if (data.error) return alert(data.error);
+      
+      events = data.events.sort((a, b) => (b.reactionCount || 0) - (a.reactionCount || 0)); // Sort by reactions
+      document.getElementById('status').textContent = `Found ${events.length} versions (cached: ${data.fromCache})`;
+      
+      const articlesDiv = document.getElementById('articles');
+      articlesDiv.innerHTML = '';
+      events.forEach((ev, idx) => {
+        const html = asciidoctor.convert(ev.content);
+        const div = document.createElement('div');
+        div.className = 'article';
+        div.innerHTML = `<h3>${ev.tags.find(t => t[0] === 'title')?.[1] || d} (by ${ev.pubkey.slice(0, 8)}...)</h3>
+                         <p>Reactions: ${ev.reactionCount || 0}</p>${html}`;
+        articlesDiv.appendChild(div);
+      });
+
+      if (events.length > 1) {
+        document.getElementById('comparison').style.display = 'block';
+        const left = document.getElementById('left');
+        const right = document.getElementById('right');
+        left.innerHTML = right.innerHTML = events.map((ev, idx) => `<option value="${idx}">${ev.pubkey.slice(0, 8)}... (${ev.reactionCount || 0} reactions)</option>`).join('');
+      }
+    }
+
+    function compareArticles() {
+      const leftIdx = document.getElementById('left').value;
+      const rightIdx = document.getElementById('right').value;
+      if (leftIdx === rightIdx) return alert('Select different versions');
+      
+      const leftContent = events[leftIdx].content.split('\n');
+      const rightContent = events[rightIdx].content.split('\n');
+      let diff = '';
+      for (let i = 0; i < Math.max(leftContent.length, rightContent.length); i++) {
+        if (leftContent[i] !== rightContent[i]) {
+          diff += `- ${leftContent[i] || ''}\n+ ${rightContent[i] || ''}\n`;
+        }
+      }
+      document.getElementById('diff').textContent = diff || 'No differences';
+    }
+  </script>
+</body>
+</html>
