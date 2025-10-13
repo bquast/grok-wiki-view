@@ -3,26 +3,41 @@
 <head>
   <meta charset="UTF-8">
   <title>Nostr Wiki Viewer</title>
-  <script src="asciidoctor.min.js"></script> 
-  <link rel="stylesheet" href="asciidoctor.css">
+  <script src="/asciidoctor.min.js"></script> <!-- Already correct for root -->
+  <link rel="stylesheet" href="/asciidoctor.css"> <!-- Changed from /css/ to root -->
   <style>
-    body { font-family: sans-serif; max-width: 800px; margin: auto; }
-    #articles { display: flex; flex-wrap: wrap; }
-    .article { border: 1px solid #ccc; padding: 10px; margin: 10px; width: 45%; }
-    #comparison { display: none; }
+    body { font-family: Arial, sans-serif; margin: 0; padding: 20px; max-width: 1200px; margin: auto; background: #fff; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .search-bar { width: 300px; padding: 5px; font-size: 16px; }
+    .buttons { display: flex; gap: 10px; }
+    .buttons button { padding: 5px 10px; font-size: 14px; }
+    .content { border: 1px solid #ccc; padding: 20px; }
+    .versions { margin-bottom: 20px; }
+    .version { border-bottom: 1px solid #eee; padding: 10px 0; }
+    .version select { width: 100%; padding: 5px; }
+    .comparison { display: flex; gap: 20px; }
+    .article-panel { flex: 1; border: 1px solid #ccc; padding: 10px; min-height: 400px; }
+    #status { color: #666; margin-bottom: 10px; }
   </style>
 </head>
 <body>
-  <h1>Nostr NIP-54 Wiki Viewer</h1>
-  <input id="d-tag" placeholder="Enter wiki title (e.g., 'nostr')" />
-  <button onclick="fetchWiki()">Load</button>
-  <div id="status"></div>
-  <div id="articles"></div>
-  <div id="comparison">
-    <h2>Comparison</h2>
-    <select id="left"></select> vs <select id="right"></select>
-    <button onclick="compareArticles()">Compare</button>
-    <pre id="diff"></pre>
+  <div class="header">
+    <h1>Nostr Wiki Viewer</h1>
+    <div class="search-bar-container">
+      <input id="d-tag" class="search-bar" placeholder="Enter wiki title (e.g., 'bitcoin')" />
+      <div class="buttons">
+        <button onclick="fetchWiki()">Load</button>
+        <button onclick="compareArticles()" id="compare-btn" disabled>Compare</button>
+      </div>
+    </div>
+  </div>
+  <div class="content">
+    <div id="status"></div>
+    <div class="versions" id="versions"></div>
+    <div class="comparison" id="comparison" style="display: none;">
+      <div class="article-panel" id="left-panel"></div>
+      <div class="article-panel" id="right-panel"></div>
+    </div>
   </div>
 
   <script>
@@ -36,42 +51,42 @@
       const data = await res.json();
       if (data.error) return alert(data.error);
       
-      events = data.events.sort((a, b) => (b.reactionCount || 0) - (a.reactionCount || 0)); // Sort by reactions
+      events = data.events.sort((a, b) => (b.created_at * 1000) - (a.created_at * 1000));
       document.getElementById('status').textContent = `Found ${events.length} versions (cached: ${data.fromCache})`;
       
-      const articlesDiv = document.getElementById('articles');
-      articlesDiv.innerHTML = '';
+      const versionsDiv = document.getElementById('versions');
+      versionsDiv.innerHTML = `<h2>Versions</h2><select id="left-select" onchange="updateCompareButton()"><option value="">Select Version 1</option></select><select id="right-select" onchange="updateCompareButton()"><option value="">Select Version 2</option></select>`;
+      const leftSelect = document.getElementById('left-select');
+      const rightSelect = document.getElementById('right-select');
       events.forEach((ev, idx) => {
-        const html = asciidoctor.convert(ev.content);
-        const div = document.createElement('div');
-        div.className = 'article';
-        div.innerHTML = `<h3>${ev.tags.find(t => t[0] === 'title')?.[1] || d} (by ${ev.pubkey.slice(0, 8)}...)</h3>
-                         <p>Reactions: ${ev.reactionCount || 0}</p>${html}`;
-        articlesDiv.appendChild(div);
+        const time = new Date(ev.created_at * 1000).toLocaleString();
+        const option = `<option value="${idx}">${time} by ${ev.pubkey.slice(0, 8)}...</option>`;
+        leftSelect.innerHTML += option;
+        rightSelect.innerHTML += option;
       });
+      document.getElementById('comparison').style.display = 'none';
+    }
 
-      if (events.length > 1) {
-        document.getElementById('comparison').style.display = 'block';
-        const left = document.getElementById('left');
-        const right = document.getElementById('right');
-        left.innerHTML = right.innerHTML = events.map((ev, idx) => `<option value="${idx}">${ev.pubkey.slice(0, 8)}... (${ev.reactionCount || 0} reactions)</option>`).join('');
-      }
+    function updateCompareButton() {
+      const left = document.getElementById('left-select').value;
+      const right = document.getElementById('right-select').value;
+      document.getElementById('compare-btn').disabled = !left || !right || left === right;
     }
 
     function compareArticles() {
-      const leftIdx = document.getElementById('left').value;
-      const rightIdx = document.getElementById('right').value;
-      if (leftIdx === rightIdx) return alert('Select different versions');
-      
-      const leftContent = events[leftIdx].content.split('\n');
-      const rightContent = events[rightIdx].content.split('\n');
-      let diff = '';
-      for (let i = 0; i < Math.max(leftContent.length, rightContent.length); i++) {
-        if (leftContent[i] !== rightContent[i]) {
-          diff += `- ${leftContent[i] || ''}\n+ ${rightContent[i] || ''}\n`;
-        }
-      }
-      document.getElementById('diff').textContent = diff || 'No differences';
+      const leftIdx = document.getElementById('left-select').value;
+      const rightIdx = document.getElementById('right-select').value;
+      if (!leftIdx || !rightIdx || leftIdx === rightIdx) return;
+
+      const leftPanel = document.getElementById('left-panel');
+      const rightPanel = document.getElementById('right-panel');
+      const leftHtml = asciidoctor.convert(events[leftIdx].content);
+      const rightHtml = asciidoctor.convert(events[rightIdx].content);
+
+      leftPanel.innerHTML = `<h3>Version ${new Date(events[leftIdx].created_at * 1000).toLocaleString()}</h3>${leftHtml}`;
+      rightPanel.innerHTML = `<h3>Version ${new Date(events[rightIdx].created_at * 1000).toLocaleString()}</h3>${rightHtml}`;
+      document.getElementById('comparison').style.display = 'flex';
+      document.getElementById('versions').style.display = 'none';
     }
   </script>
 </body>
