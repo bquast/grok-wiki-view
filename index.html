@@ -6,25 +6,30 @@
   <script src="/asciidoctor.min.js"></script>
   <link rel="stylesheet" href="/asciidoctor.css">
   <style>
-    body { font-family: Arial, sans-serif; margin: 0; padding: 20px; max-width: 1200px; margin: auto; background: #fff; }
-    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-    .search-bar { width: 300px; padding: 5px; font-size: 16px; border: 1px solid #ccc; }
-    .buttons { display: flex; gap: 10px; }
-    .buttons button { padding: 5px 10px; font-size: 14px; background: #f0f0f0; border: 1px solid #ccc; cursor: pointer; }
-    .content { border: 1px solid #ccc; padding: 20px; background: #fff; }
-    .single-view { min-height: 400px; }
+    body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 20px; max-width: 960px; margin: auto; background: #fff; line-height: 1.6; }
+    .header { border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-bottom: 20px; }
+    .header h1 { font-size: 24px; margin: 0; color: #000; }
+    .search-bar { width: 250px; padding: 5px; font-size: 14px; border: 1px solid #ccc; }
+    .buttons { margin-top: 10px; }
+    .buttons button { padding: 5px 10px; font-size: 14px; background: #f8f9fa; border: 1px solid #a2a9b1; cursor: pointer; }
+    .content { border: 1px solid #ccc; padding: 15px; background: #fff; }
+    .single-view { min-height: 500px; }
     .comparison { display: none; flex: 1; gap: 20px; }
-    .article-panel { flex: 1; border: 1px solid #ccc; padding: 10px; overflow-y: auto; }
-    #status { color: #666; margin-bottom: 10px; }
+    .article-panel { flex: 1; border: 1px solid #ccc; padding: 15px; overflow-y: auto; min-height: 500px; }
+    #status { color: #54595d; margin-bottom: 15px; font-size: 14px; }
     #versions-select { margin-bottom: 20px; display: none; }
+    #versions-select h2 { font-size: 18px; margin: 0 0 10px; color: #000; }
+    #versions-select select { width: 100%; padding: 5px; margin-bottom: 10px; border: 1px solid #ccc; }
     #back-btn { display: none; }
-    a { color: #0645ad; text-decoration: underline; } /* Wikipedia blue links */
+    a { color: #0645ad; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    h3 { font-size: 16px; color: #000; margin-top: 0; }
   </style>
 </head>
 <body>
   <div class="header">
     <h1>Nostr Wiki Viewer</h1>
-    <div class="search-bar-container">
+    <div>
       <input id="d-tag" class="search-bar" placeholder="Enter wiki title (e.g., 'bitcoin')" />
       <div class="buttons">
         <button onclick="fetchWiki()">Load</button>
@@ -36,12 +41,12 @@
   <div class="content">
     <div id="status"></div>
     <div id="versions-select">
-      <h2>Select Versions to Compare</h2>
+      <h2>Select Versions</h2>
       <select id="left-select"><option value="">Select Version 1</option></select>
       <select id="right-select"><option value="">Select Version 2</option></select>
       <button onclick="showComparison()">Show Comparison</button>
     </div>
-    <div id="single-view" class="single-view article-panel"></div>
+    <div id="single-view" class="single-view"></div>
     <div id="comparison" class="comparison">
       <div class="article-panel" id="left-panel"></div>
       <div class="article-panel" id="right-panel"></div>
@@ -60,10 +65,9 @@
       const data = await res.json();
       if (data.error) return alert(data.error);
 
-      events = data.events.sort((a, b) => b.created_at - a.created_at); // Sort descending by timestamp (latest first)
+      events = data.events.sort((a, b) => b.created_at - a.created_at); // Latest first
       document.getElementById('status').textContent = `Found ${events.length} versions (cached: ${data.fromCache})`;
 
-      // Populate dropdowns for compare mode
       const leftSelect = document.getElementById('left-select');
       const rightSelect = document.getElementById('right-select');
       leftSelect.innerHTML = '<option value="">Select Version 1</option>';
@@ -75,9 +79,8 @@
         rightSelect.innerHTML += option;
       });
 
-      // Default to single view of latest
       toggleSingleMode();
-      renderSingleView(0); // Latest is index 0 after sorting
+      renderSingleView(0); // Show latest version
     }
 
     function toggleCompareMode() {
@@ -103,8 +106,8 @@
       const singlePanel = document.getElementById('single-view');
       const ev = events[idx];
       const time = new Date(ev.created_at * 1000).toLocaleString();
-      const html = asciidoctor.convert(ev.content);
-      singlePanel.innerHTML = `<h3>Latest Version: ${time} by ${ev.pubkey.slice(0, 8)}...</h3>${html}`;
+      const html = asciidoctor.convert(ev.content) || `<pre>${ev.content}</pre>`; // Fallback to raw if AsciiDoc fails
+      singlePanel.innerHTML = `<h3>Version: ${time} by ${ev.pubkey.slice(0, 8)}...</h3>${html}`;
     }
 
     function showComparison() {
@@ -118,8 +121,8 @@
       const rightEv = events[rightIdx];
       const leftTime = new Date(leftEv.created_at * 1000).toLocaleString();
       const rightTime = new Date(rightEv.created_at * 1000).toLocaleString();
-      const leftHtml = asciidoctor.convert(leftEv.content);
-      const rightHtml = asciidoctor.convert(rightEv.content);
+      const leftHtml = asciidoctor.convert(leftEv.content) || `<pre>${leftEv.content}</pre>`;
+      const rightHtml = asciidoctor.convert(rightEv.content) || `<pre>${rightEv.content}</pre>`;
 
       leftPanel.innerHTML = `<h3>Version: ${leftTime} by ${leftEv.pubkey.slice(0, 8)}...</h3>${leftHtml}`;
       rightPanel.innerHTML = `<h3>Version: ${rightTime} by ${rightEv.pubkey.slice(0, 8)}...</h3>${rightHtml}`;
