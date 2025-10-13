@@ -3,21 +3,22 @@
 <head>
   <meta charset="UTF-8">
   <title>Nostr Wiki Viewer</title>
-  <script src="/asciidoctor.min.js"></script> <!-- Already correct for root -->
-  <link rel="stylesheet" href="/asciidoctor.css"> <!-- Changed from /css/ to root -->
+  <script src="/asciidoctor.min.js"></script>
+  <link rel="stylesheet" href="/asciidoctor.css">
   <style>
     body { font-family: Arial, sans-serif; margin: 0; padding: 20px; max-width: 1200px; margin: auto; background: #fff; }
     .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-    .search-bar { width: 300px; padding: 5px; font-size: 16px; }
+    .search-bar { width: 300px; padding: 5px; font-size: 16px; border: 1px solid #ccc; }
     .buttons { display: flex; gap: 10px; }
-    .buttons button { padding: 5px 10px; font-size: 14px; }
-    .content { border: 1px solid #ccc; padding: 20px; }
-    .versions { margin-bottom: 20px; }
-    .version { border-bottom: 1px solid #eee; padding: 10px 0; }
-    .version select { width: 100%; padding: 5px; }
-    .comparison { display: flex; gap: 20px; }
-    .article-panel { flex: 1; border: 1px solid #ccc; padding: 10px; min-height: 400px; }
+    .buttons button { padding: 5px 10px; font-size: 14px; background: #f0f0f0; border: 1px solid #ccc; cursor: pointer; }
+    .content { border: 1px solid #ccc; padding: 20px; background: #fff; }
+    .single-view { min-height: 400px; }
+    .comparison { display: none; flex: 1; gap: 20px; }
+    .article-panel { flex: 1; border: 1px solid #ccc; padding: 10px; overflow-y: auto; }
     #status { color: #666; margin-bottom: 10px; }
+    #versions-select { margin-bottom: 20px; display: none; }
+    #back-btn { display: none; }
+    a { color: #0645ad; text-decoration: underline; } /* Wikipedia blue links */
   </style>
 </head>
 <body>
@@ -27,14 +28,21 @@
       <input id="d-tag" class="search-bar" placeholder="Enter wiki title (e.g., 'bitcoin')" />
       <div class="buttons">
         <button onclick="fetchWiki()">Load</button>
-        <button onclick="compareArticles()" id="compare-btn" disabled>Compare</button>
+        <button onclick="toggleCompareMode()" id="compare-btn">Compare</button>
+        <button onclick="toggleSingleMode()" id="back-btn">Back to Single View</button>
       </div>
     </div>
   </div>
   <div class="content">
     <div id="status"></div>
-    <div class="versions" id="versions"></div>
-    <div class="comparison" id="comparison" style="display: none;">
+    <div id="versions-select">
+      <h2>Select Versions to Compare</h2>
+      <select id="left-select"><option value="">Select Version 1</option></select>
+      <select id="right-select"><option value="">Select Version 2</option></select>
+      <button onclick="showComparison()">Show Comparison</button>
+    </div>
+    <div id="single-view" class="single-view article-panel"></div>
+    <div id="comparison" class="comparison">
       <div class="article-panel" id="left-panel"></div>
       <div class="article-panel" id="right-panel"></div>
     </div>
@@ -43,6 +51,7 @@
   <script>
     const asciidoctor = Asciidoctor();
     let events = [];
+    let isCompareMode = false;
 
     async function fetchWiki() {
       const d = document.getElementById('d-tag').value.toLowerCase().replace(/[^a-z0-9-]/g, '-');
@@ -50,43 +59,72 @@
       const res = await fetch(`/api/wiki/${d}`);
       const data = await res.json();
       if (data.error) return alert(data.error);
-      
-      events = data.events.sort((a, b) => (b.created_at * 1000) - (a.created_at * 1000));
+
+      events = data.events.sort((a, b) => b.created_at - a.created_at); // Sort descending by timestamp (latest first)
       document.getElementById('status').textContent = `Found ${events.length} versions (cached: ${data.fromCache})`;
-      
-      const versionsDiv = document.getElementById('versions');
-      versionsDiv.innerHTML = `<h2>Versions</h2><select id="left-select" onchange="updateCompareButton()"><option value="">Select Version 1</option></select><select id="right-select" onchange="updateCompareButton()"><option value="">Select Version 2</option></select>`;
+
+      // Populate dropdowns for compare mode
       const leftSelect = document.getElementById('left-select');
       const rightSelect = document.getElementById('right-select');
+      leftSelect.innerHTML = '<option value="">Select Version 1</option>';
+      rightSelect.innerHTML = '<option value="">Select Version 2</option>';
       events.forEach((ev, idx) => {
         const time = new Date(ev.created_at * 1000).toLocaleString();
         const option = `<option value="${idx}">${time} by ${ev.pubkey.slice(0, 8)}...</option>`;
         leftSelect.innerHTML += option;
         rightSelect.innerHTML += option;
       });
+
+      // Default to single view of latest
+      toggleSingleMode();
+      renderSingleView(0); // Latest is index 0 after sorting
+    }
+
+    function toggleCompareMode() {
+      isCompareMode = true;
+      document.getElementById('versions-select').style.display = 'block';
+      document.getElementById('single-view').style.display = 'none';
       document.getElementById('comparison').style.display = 'none';
+      document.getElementById('back-btn').style.display = 'inline-block';
+      document.getElementById('compare-btn').style.display = 'none';
     }
 
-    function updateCompareButton() {
-      const left = document.getElementById('left-select').value;
-      const right = document.getElementById('right-select').value;
-      document.getElementById('compare-btn').disabled = !left || !right || left === right;
+    function toggleSingleMode() {
+      isCompareMode = false;
+      document.getElementById('versions-select').style.display = 'none';
+      document.getElementById('single-view').style.display = 'block';
+      document.getElementById('comparison').style.display = 'none';
+      document.getElementById('back-btn').style.display = 'none';
+      document.getElementById('compare-btn').style.display = 'inline-block';
+      renderSingleView(0); // Reset to latest
     }
 
-    function compareArticles() {
+    function renderSingleView(idx) {
+      const singlePanel = document.getElementById('single-view');
+      const ev = events[idx];
+      const time = new Date(ev.created_at * 1000).toLocaleString();
+      const html = asciidoctor.convert(ev.content);
+      singlePanel.innerHTML = `<h3>Latest Version: ${time} by ${ev.pubkey.slice(0, 8)}...</h3>${html}`;
+    }
+
+    function showComparison() {
       const leftIdx = document.getElementById('left-select').value;
       const rightIdx = document.getElementById('right-select').value;
-      if (!leftIdx || !rightIdx || leftIdx === rightIdx) return;
+      if (!leftIdx || !rightIdx || leftIdx === rightIdx) return alert('Select two different versions');
 
       const leftPanel = document.getElementById('left-panel');
       const rightPanel = document.getElementById('right-panel');
-      const leftHtml = asciidoctor.convert(events[leftIdx].content);
-      const rightHtml = asciidoctor.convert(events[rightIdx].content);
+      const leftEv = events[leftIdx];
+      const rightEv = events[rightIdx];
+      const leftTime = new Date(leftEv.created_at * 1000).toLocaleString();
+      const rightTime = new Date(rightEv.created_at * 1000).toLocaleString();
+      const leftHtml = asciidoctor.convert(leftEv.content);
+      const rightHtml = asciidoctor.convert(rightEv.content);
 
-      leftPanel.innerHTML = `<h3>Version ${new Date(events[leftIdx].created_at * 1000).toLocaleString()}</h3>${leftHtml}`;
-      rightPanel.innerHTML = `<h3>Version ${new Date(events[rightIdx].created_at * 1000).toLocaleString()}</h3>${rightHtml}`;
+      leftPanel.innerHTML = `<h3>Version: ${leftTime} by ${leftEv.pubkey.slice(0, 8)}...</h3>${leftHtml}`;
+      rightPanel.innerHTML = `<h3>Version: ${rightTime} by ${rightEv.pubkey.slice(0, 8)}...</h3>${rightHtml}`;
       document.getElementById('comparison').style.display = 'flex';
-      document.getElementById('versions').style.display = 'none';
+      document.getElementById('versions-select').style.display = 'none';
     }
   </script>
 </body>
