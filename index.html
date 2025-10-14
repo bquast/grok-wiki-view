@@ -20,7 +20,6 @@
     #versions-select { margin-bottom: 20px; display: none; }
     #versions-select h2 { font-size: 18px; margin: 0 0 10px; color: #202122; }
     #versions-select select { width: 100%; padding: 5px; margin-bottom: 10px; border: 1px solid #a2a9b1; }
-    #single-select { width: 100%; padding: 5px; margin-bottom: 10px; border: 1px solid #a2a9b1; display: none; }
     #back-btn { display: none; }
     a { color: #0645ad; text-decoration: none; }
     a:hover { text-decoration: underline; }
@@ -47,7 +46,6 @@
       <select id="right-select"><option value="">Select Version 2</option></select>
       <button onclick="showComparison()">Show Comparison</button>
     </div>
-    <select id="single-select" onchange="renderSingleView(this.value)"></select>
     <div id="single-view" class="single-view"></div>
     <div id="comparison" class="comparison">
       <div class="article-panel" id="left-panel"></div>
@@ -60,35 +58,30 @@
     let events = [];
     let isCompareMode = false;
 
-    async function fetchWiki(overrideD = null) {
-      const d = overrideD || document.getElementById('d-tag').value.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-      if (overrideD) document.getElementById('d-tag').value = d;
+    async function fetchWiki() {
+      const d = document.getElementById('d-tag').value.toLowerCase().replace(/[^a-z0-9-]/g, '-');
       document.getElementById('status').textContent = 'Loading...';
       try {
         const res = await fetch(`/api/wiki/${d}`);
         const data = await res.json();
         if (data.error) return alert(data.error);
 
-        events = data.events.sort((a, b) => (b.reactionCount || 0) - (a.reactionCount || 0)); // Sort by reactions descending
+        events = data.events.sort((a, b) => b.created_at - a.created_at); // Latest first
         document.getElementById('status').textContent = `Found ${events.length} versions (cached: ${data.fromCache})`;
 
         const leftSelect = document.getElementById('left-select');
         const rightSelect = document.getElementById('right-select');
-        const singleSelect = document.getElementById('single-select');
         leftSelect.innerHTML = '<option value="">Select Version 1</option>';
         rightSelect.innerHTML = '<option value="">Select Version 2</option>';
-        singleSelect.innerHTML = '';
         events.forEach((ev, idx) => {
           const time = new Date(ev.created_at * 1000).toLocaleString();
-          const reactions = ev.reactionCount || 0;
-          const option = `<option value="${idx}">${time} by ${ev.pubkey.slice(0, 8)}... (${reactions} reactions)</option>`;
+          const option = `<option value="${idx}">${time} by ${ev.pubkey.slice(0, 8)}...</option>`;
           leftSelect.innerHTML += option;
           rightSelect.innerHTML += option;
-          singleSelect.innerHTML += option;
         });
 
         toggleSingleMode();
-        renderSingleView(0); // Show most reacted version
+        renderSingleView(0); // Show latest version
       } catch (e) {
         document.getElementById('status').textContent = 'Error loading data';
         console.error(e);
@@ -98,7 +91,6 @@
     function toggleCompareMode() {
       isCompareMode = true;
       document.getElementById('versions-select').style.display = 'block';
-      document.getElementById('single-select').style.display = 'none';
       document.getElementById('single-view').style.display = 'none';
       document.getElementById('comparison').style.display = 'none';
       document.getElementById('back-btn').style.display = 'inline-block';
@@ -108,25 +100,20 @@
     function toggleSingleMode() {
       isCompareMode = false;
       document.getElementById('versions-select').style.display = 'none';
-      document.getElementById('single-select').style.display = 'block';
       document.getElementById('single-view').style.display = 'block';
       document.getElementById('comparison').style.display = 'none';
       document.getElementById('back-btn').style.display = 'none';
       document.getElementById('compare-btn').style.display = 'inline-block';
-      renderSingleView(0); // Reset to most reacted
+      renderSingleView(0); // Reset to latest
     }
 
     function renderSingleView(idx) {
       const singlePanel = document.getElementById('single-view');
       const ev = events[idx];
       const time = new Date(ev.created_at * 1000).toLocaleString();
-      const processedContent = ev.content.replace(/\[\[([^\]]+)\]\]/g, (match, title) => {
-        const normalized = title.toLowerCase().replace(/[^a-z0-9]/g, '-');
-        return `link:javascript:void(0)[${title}, role="wiki-link", data-title="${normalized}"]`;
-      });
-      const html = asciidoctor.convert(processedContent) || `<pre>${ev.content}</pre>`;
-      singlePanel.innerHTML = `<h3>Version: ${time} by ${ev.pubkey.slice(0, 8)}... (${ev.reactionCount || 0} reactions)</h3>${html}`;
-      addWikiLinkListeners(singlePanel);
+      const html = asciidoctor.convert(ev.content) || `<pre>${ev.content}</pre>`; // Fallback to raw
+      singlePanel.innerHTML = `<h3>Version: ${time} by ${ev.pubkey.slice(0, 8)}...</h3>${html}`;
+      console.log('Rendered single:', html); // Debug
     }
 
     function showComparison() {
@@ -140,32 +127,15 @@
       const rightEv = events[rightIdx];
       const leftTime = new Date(leftEv.created_at * 1000).toLocaleString();
       const rightTime = new Date(rightEv.created_at * 1000).toLocaleString();
-      const leftProcessed = leftEv.content.replace(/\[\[([^\]]+)\]\]/g, (match, title) => {
-        const normalized = title.toLowerCase().replace(/[^a-z0-9]/g, '-');
-        return `link:javascript:void(0)[${title}, role="wiki-link", data-title="${normalized}"]`;
-      });
-      const rightProcessed = rightEv.content.replace(/\[\[([^\]]+)\]\]/g, (match, title) => {
-        const normalized = title.toLowerCase().replace(/[^a-z0-9]/g, '-');
-        return `link:javascript:void(0)[${title}, role="wiki-link", data-title="${normalized}"]`;
-      });
-      const leftHtml = asciidoctor.convert(leftProcessed) || `<pre>${leftEv.content}</pre>`;
-      const rightHtml = asciidoctor.convert(rightProcessed) || `<pre>${rightEv.content}</pre>`;
+      const leftHtml = asciidoctor.convert(leftEv.content) || `<pre>${leftEv.content}</pre>`;
+      const rightHtml = asciidoctor.convert(rightEv.content) || `<pre>${rightEv.content}</pre>`;
+      console.log('Left HTML:', leftHtml); // Debug
+      console.log('Right HTML:', rightHtml); // Debug
 
-      leftPanel.innerHTML = `<h3>Version: ${leftTime} by ${leftEv.pubkey.slice(0, 8)}... (${leftEv.reactionCount || 0} reactions)</h3>${leftHtml}`;
-      rightPanel.innerHTML = `<h3>Version: ${rightTime} by ${rightEv.pubkey.slice(0, 8)}... (${rightEv.reactionCount || 0} reactions)</h3>${rightHtml}`;
+      leftPanel.innerHTML = `<h3>Version: ${leftTime} by ${leftEv.pubkey.slice(0, 8)}...</h3>${leftHtml}`;
+      rightPanel.innerHTML = `<h3>Version: ${rightTime} by ${rightEv.pubkey.slice(0, 8)}...</h3>${rightHtml}`;
       document.getElementById('comparison').style.display = 'flex';
       document.getElementById('versions-select').style.display = 'none';
-      addWikiLinkListeners(leftPanel);
-      addWikiLinkListeners(rightPanel);
-    }
-
-    function addWikiLinkListeners(panel) {
-      panel.querySelectorAll('.wiki-link').forEach(a => {
-        a.addEventListener('click', e => {
-          e.preventDefault();
-          fetchWiki(a.dataset.title);
-        });
-      });
     }
   </script>
 </body>
