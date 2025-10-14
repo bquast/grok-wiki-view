@@ -33,6 +33,30 @@ export async function onRequestGet({ params, env }) {
   }
 
   const uniqueEvents = [...new Map(events.map(ev => [ev.id, ev])).values()];
+
+  // Fetch reactions for each event
+  for (const ev of uniqueEvents) {
+    let reactionCount = 0;
+    for (const relay of relays) {
+      const ws = new WebSocket(relay);
+      await new Promise(resolve => ws.addEventListener('open', resolve));
+
+      const reactionSub = 'reax-' + ev.id;
+      ws.send(JSON.stringify(['REQ', reactionSub, { kinds: [7], '#e': [ev.id], limit: 100 }]));
+
+      const reaxPromise = new Promise(resolve => {
+        ws.addEventListener('message', msg => {
+          const data = JSON.parse(msg.data);
+          if (data[0] === 'EVENT' && data[2].content === '+') reactionCount++;
+        });
+        setTimeout(() => { ws.send(JSON.stringify(['CLOSE', reactionSub])); resolve(); }, 3000);
+      });
+      await reaxPromise;
+      ws.close();
+    }
+    ev.reactionCount = reactionCount;
+  }
+
   await KV.put(cacheKey, JSON.stringify({ events: uniqueEvents, lastUpdated: Date.now() }));
 
   return new Response(JSON.stringify({ events: uniqueEvents, fromCache: false }), { headers: { 'Content-Type': 'application/json' } });
